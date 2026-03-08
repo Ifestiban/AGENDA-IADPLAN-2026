@@ -1,0 +1,7 @@
+Como abrir o app:
+1. Extraia o arquivo ZIP.
+2. Abra a pasta.
+3. Clique duas vezes em index.html.
+
+O app já está preenchido com os eventos da planilha.
+Total importado: 148 eventos.
