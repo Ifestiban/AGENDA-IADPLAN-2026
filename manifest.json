@@ -1,6 +1,6 @@
 {
   "name": "IADPLAN Agenda 2026",
-  "short_name": "IADPLAN",
+  "short_name": "agenda IADPLAN",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#040910",
