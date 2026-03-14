@@ -196,8 +196,78 @@ function checkReminders(){
   localStorage.setItem(key, JSON.stringify(already));
 }
 
-function registerSW(){
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-  }
+function registerSW(){}
+let newWorker = null;
+
+function showUpdateBanner() {
+  if (document.getElementById("updateBanner")) return;
+
+  const banner = document.createElement("div");
+  banner.id = "updateBanner";
+  banner.innerHTML = `
+    <div style="
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      z-index: 9999;
+      background: #09111f;
+      color: #fff;
+      padding: 14px 16px;
+      border-radius: 14px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.25);
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      font-family: sans-serif;
+    ">
+      <span>Nova versão da agenda disponível.</span>
+      <button id="updateNowBtn" style="
+        background: #fff;
+        color: #09111f;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 14px;
+        font-weight: 600;
+        cursor: pointer;
+      ">Atualizar</button>
+    </div>
+  `;
+
+  document.body.appendChild(banner);
+
+  document.getElementById("updateNowBtn").addEventListener("click", () => {
+    if (newWorker) {
+      newWorker.postMessage({ type: "SKIP_WAITING" });
+    }
+  });
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").then(reg => {
+    if (reg.waiting) {
+      newWorker = reg.waiting;
+      showUpdateBanner();
+    }
+
+    reg.addEventListener("updatefound", () => {
+      const installingWorker = reg.installing;
+      if (!installingWorker) return;
+
+      installingWorker.addEventListener("statechange", () => {
+        if (
+          installingWorker.state === "installed" &&
+          navigator.serviceWorker.controller
+        ) {
+          newWorker = installingWorker;
+          showUpdateBanner();
+        }
+      });
+    });
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      window.location.reload();
+    });
+  });
 }
