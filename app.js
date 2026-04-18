@@ -1,8 +1,7 @@
-
 const events = (window.__EVENTS__ || []).map(e => ({
   ...e,
-  startDate: new Date(`${e.dateStart}T09:00:00`),
-  endDate: new Date(`${e.dateEnd}T18:00:00`)
+  startDate: new Date(e.dateStart + "T09:00:00"),
+  endDate: new Date(e.dateEnd + "T18:00:00")
 })).sort((a,b) => a.startDate - b.startDate);
 
 const refs = {
@@ -23,6 +22,7 @@ const refs = {
 
 let deferredPrompt = null;
 let navFilter = 'all';
+let swRegistration = null;
 
 init();
 
@@ -31,8 +31,8 @@ function init(){
   bind();
   restoreSettings();
   updateUI();
-  startReminderLoop();
   registerSW();
+  startReminderLoop();
 }
 
 function fillMonthFilter(){
@@ -83,6 +83,7 @@ function saveSettings(){
     onlyUpcoming: refs.onlyUpcoming.checked
   }));
 }
+
 function restoreSettings(){
   try{
     const s = JSON.parse(localStorage.getItem('iadplan-ui-settings') || '{}');
@@ -94,7 +95,7 @@ function restoreSettings(){
 
 function stripTime(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
-function diffDays(a,b){ return Math.round((stripTime(a)-stripTime(b))/(24*60*60*1000)); }
+function diffDays(a,b){ return Math.floor((stripTime(a)-stripTime(b))/(24*60*60*1000)); }
 
 function formatEventDate(event){
   return event.dayStart === event.dayEnd
@@ -118,6 +119,7 @@ function updateUI(){
   });
 
   const next = events.filter(e=>e.endDate >= today).sort((a,b)=>a.startDate-b.startDate)[0];
+
   if(next){
     refs.heroTitle.textContent = next.title;
     refs.heroMeta.textContent = `${formatEventDate(next)} • Local: ${next.local}`;
@@ -126,20 +128,15 @@ function updateUI(){
     refs.heroMeta.textContent = 'Cadastre novos eventos.';
   }
 
-  refs.totalCount.textContent = String(events.length);
-  refs.todayCount.textContent = String(events.filter(e => today >= stripTime(e.startDate) && today <= stripTime(e.endDate)).length);
-  refs.weekCount.textContent = String(events.filter(e => e.startDate >= today && e.startDate <= plus7).length);
-
+  refs.totalCount.textContent = events.length;
+  refs.todayCount.textContent = events.filter(e => today >= stripTime(e.startDate) && today <= stripTime(e.endDate)).length;
+  refs.weekCount.textContent = events.filter(e => e.startDate >= today && e.startDate <= plus7).length;
   refs.resultsInfo.textContent = `${filtered.length} resultado(s)`;
-
-  if(!filtered.length){
-    refs.eventList.innerHTML = '<div class="card empty">Nenhum evento encontrado com os filtros atuais.</div>';
-    return;
-  }
 
   refs.eventList.innerHTML = filtered.map(event=>{
     const daysLeft = diffDays(event.startDate, today);
     const tag = daysLeft >= 0 && daysLeft <= 7 ? `<span class="tag alert">Faltam ${daysLeft} dia(s)</span>` : '';
+
     return `
       <article class="card event-card">
         <div class="event-title">${event.title}</div>
@@ -155,119 +152,61 @@ function updateUI(){
 
 async function enableNotifications(){
   if(!('Notification' in window)){
-    alert('Este aparelho não suporta notificações no navegador.');
+    alert('Sem suporte a notificações.');
     return;
   }
-  const result = await Notification.requestPermission();
-  if(result === 'granted'){
+
+  const permission = await Notification.requestPermission();
+
+  if(permission === 'granted'){
     localStorage.setItem('iadplan-notifications', 'on');
-    alert('Lembretes ativados no navegador.');
+    alert('Notificações ativadas!');
   }
 }
 
 function startReminderLoop(){
   checkReminders();
-  setInterval(checkReminders, 60000);
+  setInterval(checkReminders, 30000); // mais rápido (30s)
 }
 
-function checkReminders(){
+async function checkReminders(){
   if(localStorage.getItem('iadplan-notifications') !== 'on') return;
   if(Notification.permission !== 'granted') return;
+  if(!swRegistration) return;
 
   const leadDays = Number(refs.leadTime.value || 7);
   const today = stripTime(new Date());
-  const key = `iadplan-reminders-${today.toISOString().slice(0,10)}-${leadDays}`;
-  const already = JSON.parse(localStorage.getItem(key) || '[]');
+
+  const sentKey = "iadplan-sent";
+  const sent = JSON.parse(localStorage.getItem(sentKey) || "[]");
 
   const due = events.filter(event=>{
     const d = diffDays(event.startDate, today);
     return d >= 0 && d <= leadDays;
   });
 
-  due.forEach(event=>{
-    if(already.includes(event.id)) return;
-    new Notification('IADPLAN • Evento próximo', {
-      body: `${event.title} • ${formatEventDate(event)} • ${event.local}`,
-      icon: 'icon-192.png'
-    });
-    already.push(event.id);
-  });
+  for(const event of due){
+    if(sent.includes(event.id)) continue;
 
-  localStorage.setItem(key, JSON.stringify(already));
+    await swRegistration.showNotification("Evento próximo", {
+      body: `${event.title} • ${formatEventDate(event)}`,
+      icon: "icon-192.png",
+      tag: event.id,
+      renotify: true
+    });
+
+    sent.push(event.id);
+  }
+
+  localStorage.setItem(sentKey, JSON.stringify(sent));
 }
 
-function registerSW(){}
-let newWorker = null;
-
-function showUpdateBanner() {
-  if (document.getElementById("updateBanner")) return;
-
-  const banner = document.createElement("div");
-  banner.id = "updateBanner";
-  banner.innerHTML = `
-    <div style="
-      position: fixed;
-      left: 16px;
-      right: 16px;
-      bottom: 16px;
-      z-index: 9999;
-      background: #09111f;
-      color: #fff;
-      padding: 14px 16px;
-      border-radius: 14px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.25);
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-      font-family: sans-serif;
-    ">
-      <span>Nova versão da agenda disponível.</span>
-      <button id="updateNowBtn" style="
-        background: #fff;
-        color: #09111f;
-        border: none;
-        border-radius: 10px;
-        padding: 8px 14px;
-        font-weight: 600;
-        cursor: pointer;
-      ">Atualizar</button>
-    </div>
-  `;
-
-  document.body.appendChild(banner);
-
-  document.getElementById("updateNowBtn").addEventListener("click", () => {
-    if (newWorker) {
-      newWorker.postMessage({ type: "SKIP_WAITING" });
-    }
-  });
-}
-
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").then(reg => {
-    if (reg.waiting) {
-      newWorker = reg.waiting;
-      showUpdateBanner();
-    }
-
-    reg.addEventListener("updatefound", () => {
-      const installingWorker = reg.installing;
-      if (!installingWorker) return;
-
-      installingWorker.addEventListener("statechange", () => {
-        if (
-          installingWorker.state === "installed" &&
-          navigator.serviceWorker.controller
-        ) {
-          newWorker = installingWorker;
-          showUpdateBanner();
-        }
-      });
-    });
-
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      window.location.reload();
-    });
-  });
+function registerSW(){
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("./sw.js")
+      .then(reg=>{
+        swRegistration = reg;
+      })
+      .catch(err=>console.error("SW erro:", err));
+  }
 }
